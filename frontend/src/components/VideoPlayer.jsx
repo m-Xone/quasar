@@ -1,8 +1,18 @@
-import React, { useRef, useEffect } from 'react';
-import { Film } from 'lucide-react';
+import React, { useRef, useEffect, useMemo } from 'react';
+import { Film, MonitorPlay } from 'lucide-react';
+
+/** Extract the 11-char YouTube video id from common URL shapes. */
+export function getYouTubeId(url) {
+  if (!url) return null;
+  const match = url.match(
+    /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([\w-]{11})/
+  );
+  return match ? match[1] : null;
+}
 
 const VideoPlayer = ({ videoFile, youtubeUrl }) => {
   const videoRef = useRef(null);
+  const youtubeId = useMemo(() => getYouTubeId(youtubeUrl), [youtubeUrl]);
 
   useEffect(() => {
     if (videoFile && videoRef.current) {
@@ -17,42 +27,50 @@ const VideoPlayer = ({ videoFile, youtubeUrl }) => {
 
   if (!videoFile && !youtubeUrl) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-surface-100 to-surface-50 rounded-2xl">
+      <div className="flex h-full w-full items-center justify-center rounded-sm border border-dashed border-border bg-card/40">
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-primary-50 rounded-2xl mb-4">
-            <Film className="text-primary-400" size={40} />
-          </div>
-          <p className="text-gray-500 font-medium">No video selected</p>
-          <p className="text-sm text-gray-400 mt-1">Upload a video or enter a YouTube URL to begin</p>
+          <MonitorPlay className="mx-auto mb-3 size-10 text-muted-foreground/40" />
+          <p className="text-xs uppercase tracking-widest text-muted-foreground">
+            no signal
+          </p>
+          <p className="mt-1 text-[10px] text-muted-foreground/60">
+            awaiting video input…
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full h-full flex items-center justify-center bg-gray-950 rounded-2xl ring-1 ring-white/10 overflow-hidden">
+    <div className="h-full w-full overflow-hidden rounded-sm border border-border bg-black">
       {videoFile && (
         <video
           ref={videoRef}
           controls
-          className="w-full h-full object-contain"
+          className="h-full w-full object-contain"
           preload="metadata"
         >
           Your browser does not support the video tag.
         </video>
       )}
-      {youtubeUrl && !videoFile && (
-        <div className="w-full h-full flex items-center justify-center p-8">
-          <div className="text-center text-white">
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-white/10 rounded-2xl mb-4">
-              <Film size={40} />
-            </div>
-            <p className="font-medium">YouTube Video</p>
-            <p className="text-sm text-gray-300 mt-2 break-all max-w-md">
-              {youtubeUrl}
+      {!videoFile && youtubeId && (
+        <iframe
+          className="h-full w-full"
+          src={`https://www.youtube-nocookie.com/embed/${youtubeId}`}
+          title="YouTube video preview"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+      )}
+      {!videoFile && youtubeUrl && !youtubeId && (
+        <div className="flex h-full w-full items-center justify-center p-6">
+          <div className="text-center">
+            <Film className="mx-auto mb-3 size-10 text-muted-foreground/50" />
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">
+              youtube source
             </p>
-            <p className="text-xs text-gray-400 mt-4">
-              Video preview not available for YouTube URLs
+            <p className="mt-2 max-w-md break-all text-[10px] text-muted-foreground/70">
+              {youtubeUrl}
             </p>
           </div>
         </div>

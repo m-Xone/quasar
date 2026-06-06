@@ -1,107 +1,109 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@layer base {
+  :root,
+  .dark {
+    /* hacker terminal theme */
+    --background: 160 18% 3%;
+    --foreground: 140 25% 86%;
 
-  color-scheme: light;
-  color: rgba(0, 0, 0, 0.87);
-  background-color: #f8f7fa;
+    --card: 160 16% 5%;
+    --card-foreground: 140 25% 86%;
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+    --popover: 160 16% 5%;
+    --popover-foreground: 140 25% 86%;
+
+    --primary: 142 84% 55%;
+    --primary-foreground: 160 18% 4%;
+
+    --secondary: 158 14% 10%;
+    --secondary-foreground: 142 60% 75%;
+
+    --muted: 158 14% 9%;
+    --muted-foreground: 145 10% 50%;
+
+    --accent: 187 92% 50%;
+    --accent-foreground: 160 18% 4%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 152 14% 14%;
+    --input: 152 14% 14%;
+    --ring: 142 84% 55%;
+
+    --radius: 0.25rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply m-0 bg-background font-mono text-foreground antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.3);
+  }
 }
 
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+@layer utilities {
+  /* faint CRT scanlines over the whole app */
+  .scanlines::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 2px,
+      rgba(0, 0, 0, 0.12) 3px
+    );
+    mix-blend-mode: multiply;
+  }
+
+  /* faint phosphor grid backdrop */
+  .grid-bg {
+    background-image:
+      linear-gradient(hsl(var(--primary) / 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--primary) / 0.035) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  .text-glow {
+    text-shadow: 0 0 8px hsl(var(--primary) / 0.6);
+  }
 }
 
-#root {
-  width: 100%;
-  min-height: 100vh;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-/* Base transitions on interactive elements */
-button,
-a,
-input,
-[role="button"] {
-  transition: all 0.2s ease;
-}
-
-/* Custom scrollbar */
+/* terminal scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1eff5;
+  background: hsl(var(--background));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #b0a9bf;
-  border-radius: 4px;
+  background: hsl(var(--border));
+  border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #8b82a0;
-}
-
-@layer utilities {
-  .glass {
-    background: rgba(255, 255, 255, 0.65);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.4);
-  }
-
-  .glass-dark {
-    background: rgba(26, 16, 64, 0.85);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .gradient-mesh {
-    background-image:
-      radial-gradient(at 20% 20%, rgba(108, 86, 240, 0.08) 0%, transparent 50%),
-      radial-gradient(at 80% 80%, rgba(168, 85, 247, 0.06) 0%, transparent 50%),
-      radial-gradient(at 50% 50%, rgba(245, 158, 11, 0.04) 0%, transparent 50%);
-  }
-
-  .text-gradient {
-    background: linear-gradient(135deg, #6c56f0, #a855f7);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  .shimmer-bg {
-    background: linear-gradient(
-      90deg,
-      rgba(108, 86, 240, 0.04) 0%,
-      rgba(108, 86, 240, 0.10) 50%,
-      rgba(108, 86, 240, 0.04) 100%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 2s linear infinite;
-  }
+  background: hsl(var(--primary) / 0.5);
 }
