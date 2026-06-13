@@ -4,7 +4,7 @@ A full-stack web application that generates AI-powered narrative summaries of vi
 
 ## Architecture
 
-- **Frontend** -- React 18, Tailwind CSS, Vite
+- **Frontend** -- React 18, shadcn/ui (Radix primitives), Tailwind CSS, Vite. Dark terminal-style theme designed for wide screens, with analysis history persisted client-side in IndexedDB.
 - **Backend** -- Python / FastAPI, Google Gemini API (`google-genai`), yt-dlp, WeasyPrint, FFmpeg
 
 ## Prerequisites
@@ -67,9 +67,10 @@ Open http://localhost:3000 in your browser.
 
 ## Usage
 
-1. Choose **Upload Video** (MP4, AVI, MOV, MKV, WebM; max 2 GB) or **YouTube URL**.
-2. The AI analysis streams in real time on the right panel; the video preview appears on the left.
-3. Once complete, click **Download PDF** to export a formatted report.
+1. Choose **Upload** (MP4, AVI, MOV, MKV, WebM; max 2 GB) or **YouTube** in the source input panel.
+2. The AI analysis streams in real time on the right panel; the video preview appears on the left (YouTube videos are embedded inline).
+3. Once complete, click **Export PDF** to download a formatted report.
+4. Completed analyses are saved to browser storage (IndexedDB) automatically and appear in the **history** sidebar — they survive page reloads and can be reopened, deleted individually, or purged in bulk. Uploaded video files themselves are not persisted, only the analysis output.
 
 ## API Endpoints
 
@@ -102,15 +103,20 @@ video_summarizer/
 │   ├── package.json
 │   ├── vite.config.js
 │   ├── tailwind.config.js
+│   ├── components.json          # shadcn/ui configuration
 │   └── src/
 │       ├── App.jsx
 │       ├── main.jsx
 │       ├── components/
+│       │   ├── ui/              # shadcn/ui primitives (button, card, tabs, ...)
+│       │   ├── HistorySidebar.jsx
 │       │   ├── VideoInput.jsx
 │       │   ├── VideoPlayer.jsx
 │       │   ├── SummaryPanel.jsx
-│       │   ├── PDFDownload.jsx
-│       │   └── LoadingSpinner.jsx
+│       │   └── PDFDownload.jsx
+│       ├── lib/
+│       │   ├── storage.js       # IndexedDB-backed analysis history
+│       │   └── utils.js
 │       └── api/
 │           └── client.js
 ├── setup.sh

@@ -1,13 +1,26 @@
-import React, { useState, useCallback } from 'react';
-import { Video, Sparkles, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { TerminalSquare, Cpu, Loader2, CircleDot } from 'lucide-react';
+
+import HistorySidebar from './components/HistorySidebar';
 import VideoInput from './components/VideoInput';
 import VideoPlayer from './components/VideoPlayer';
 import SummaryPanel from './components/SummaryPanel';
 import PDFDownload from './components/PDFDownload';
-import LoadingSpinner from './components/LoadingSpinner';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { analyzeUploadedVideo, analyzeYouTubeVideo } from './api/client';
+import {
+  saveAnalysis,
+  listAnalyses,
+  deleteAnalysis,
+  clearAnalyses,
+} from '@/lib/storage';
+import { formatBytes } from '@/lib/utils';
 
 function App() {
+  const [sessions, setSessions] = useState([]);
+  const [activeId, setActiveId] = useState(null);
+
   const [videoFile, setVideoFile] = useState(null);
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [summary, setSummary] = useState('');
@@ -18,12 +31,64 @@ function App() {
   const [error, setError] = useState(null);
   const [videoMetadata, setVideoMetadata] = useState(null);
 
+  // Refs mirror streaming state so the save-on-complete callback never
+  // captures stale values from the closure.
+  const summaryRef = useRef('');
+  const metadataRef = useRef(null);
+
+  const refreshSessions = useCallback(async () => {
+    try {
+      setSessions(await listAnalyses());
+    } catch (err) {
+      console.error('Failed to load history from IndexedDB:', err);
+    }
+  }, []);
+
+  // Load persisted history on mount
+  useEffect(() => {
+    refreshSessions();
+  }, [refreshSessions]);
+
   const resetState = () => {
     setSummary('');
+    summaryRef.current = '';
     setError(null);
     setIsStreaming(false);
     setIsEnhancing(false);
     setStatusMessage('');
+    setActiveId(null);
+  };
+
+  const handleNewAnalysis = () => {
+    resetState();
+    setVideoFile(null);
+    setYoutubeUrl('');
+    setVideoMetadata(null);
+    metadataRef.current = null;
+  };
+
+  const persistCompletedAnalysis = async () => {
+    const finalSummary = summaryRef.current;
+    const meta = metadataRef.current;
+    if (!finalSummary || !meta) return;
+
+    const record = {
+      id: crypto.randomUUID(),
+      createdAt: Date.now(),
+      source: meta.source,
+      title: meta.filename,
+      url: meta.url || null,
+      fileSize: meta.size ?? null,
+      summary: finalSummary,
+    };
+
+    try {
+      await saveAnalysis(record);
+      setActiveId(record.id);
+      await refreshSessions();
+    } catch (err) {
+      console.error('Failed to persist analysis:', err);
+    }
   };
 
   const handleVideoSelect = useCallback((file) => {
@@ -31,15 +96,16 @@ function App() {
     setYoutubeUrl('');
     resetState();
 
-    // Set initial metadata
-    setVideoMetadata({
+    const meta = {
       filename: file.name,
       size: file.size,
       source: 'upload',
+      url: null,
       duration: null,
-    });
+    };
+    setVideoMetadata(meta);
+    metadataRef.current = meta;
 
-    // Start analysis automatically
     handleAnalyze(file, null);
   }, []);
 
@@ -48,118 +114,133 @@ function App() {
     setVideoFile(null);
     resetState();
 
-    // Set initial metadata
-    setVideoMetadata({
+    const meta = {
       filename: 'YouTube Video',
       size: null,
       source: 'youtube',
+      url,
       duration: null,
-    });
+    };
+    setVideoMetadata(meta);
+    metadataRef.current = meta;
 
     handleAnalyze(null, url);
   }, []);
+
+  const handleSelectSession = useCallback((session) => {
+    setActiveId(session.id);
+    setSummary(session.summary);
+    summaryRef.current = session.summary;
+    setError(null);
+    setIsStreaming(false);
+    setIsEnhancing(false);
+    setStatusMessage('');
+    setVideoFile(null);
+    setYoutubeUrl(session.source === 'youtube' ? session.url || '' : '');
+
+    const meta = {
+      filename: session.title,
+      size: session.fileSize,
+      source: session.source,
+      url: session.url,
+      duration: null,
+    };
+    setVideoMetadata(meta);
+    metadataRef.current = meta;
+  }, []);
+
+  const handleDeleteSession = useCallback(
+    async (id) => {
+      try {
+        await deleteAnalysis(id);
+        if (id === activeId) handleNewAnalysis();
+        await refreshSessions();
+      } catch (err) {
+        console.error('Failed to delete analysis:', err);
+      }
+    },
+    [activeId, refreshSessions]
+  );
+
+  const handleClearAll = useCallback(async () => {
+    try {
+      await clearAnalyses();
+      handleNewAnalysis();
+      await refreshSessions();
+    } catch (err) {
+      console.error('Failed to clear history:', err);
+    }
+  }, [refreshSessions]);
 
   const handleAnalyze = async (file, ytUrl) => {
     setIsProcessing(true);
     setIsStreaming(true);
     setError(null);
     setSummary('');
+    summaryRef.current = '';
+
+    const onChunk = (chunk) => {
+      summaryRef.current += chunk;
+      setSummary(summaryRef.current);
+    };
+
+    const onError = (err) => {
+      setError(err.message || 'Failed to analyze video');
+      setIsStreaming(false);
+      setIsEnhancing(false);
+    };
+
+    const onComplete = () => {
+      setIsStreaming(false);
+      setIsProcessing(false);
+      setIsEnhancing(false);
+      persistCompletedAnalysis();
+    };
+
+    const onStatus = (statusMsg) => {
+      setStatusMessage(statusMsg);
+      setIsEnhancing(true);
+    };
+
+    const onEnhance = (enhancedSummary) => {
+      // Replace summary with enhanced version containing screenshots
+      summaryRef.current = enhancedSummary;
+      setSummary(enhancedSummary);
+      setIsEnhancing(false);
+      setStatusMessage('');
+    };
 
     try {
       if (file) {
-        // Analyze uploaded video
         await analyzeUploadedVideo(
           file,
           'general',
-          (chunk) => {
-            setSummary((prev) => prev + chunk);
-          },
-          (err) => {
-            setError(err.message || 'Failed to analyze video');
-            setIsStreaming(false);
-            setIsEnhancing(false);
-          },
-          () => {
-            setIsStreaming(false);
-            setIsProcessing(false);
-            setIsEnhancing(false);
-          },
-          (statusMsg) => {
-            // Handle status updates
-            setStatusMessage(statusMsg);
-            setIsEnhancing(true);
-          },
-          (enhancedSummary) => {
-            // Replace summary with enhanced version containing screenshots
-            console.log('Received enhanced summary, length:', enhancedSummary.length);
-            console.log('Contains images:', enhancedSummary.includes('![Screenshot'));
-
-            // Extract and log image data URI info
-            const imgMatch = enhancedSummary.match(/!\[Screenshot at [^\]]+\]\(data:image\/jpeg;base64,([^\)]+)\)/);
-            if (imgMatch) {
-              const base64Data = imgMatch[1];
-              console.log('First image base64 length:', base64Data.length);
-              console.log('First 50 chars:', base64Data.substring(0, 50));
-              console.log('Last 50 chars:', base64Data.substring(base64Data.length - 50));
-            } else {
-              console.warn('Could not find image markdown pattern');
-            }
-
-            setSummary(enhancedSummary);
-            setIsEnhancing(false);
-            setStatusMessage('');
-          }
+          onChunk,
+          onError,
+          onComplete,
+          onStatus,
+          onEnhance
         );
       } else if (ytUrl) {
-        // Analyze YouTube video
         await analyzeYouTubeVideo(
           ytUrl,
           'general',
-          (chunk) => {
-            setSummary((prev) => prev + chunk);
-          },
+          onChunk,
           (metadata) => {
-            // Update metadata with YouTube info
-            setVideoMetadata((prev) => ({
-              ...prev,
-              filename: metadata.title || 'YouTube Video',
-            }));
+            // Update metadata with the resolved YouTube title
+            setVideoMetadata((prev) => {
+              const next = {
+                ...prev,
+                filename: metadata.title || 'YouTube Video',
+              };
+              metadataRef.current = next;
+              return next;
+            });
           },
-          (err) => {
-            setError(err.message || 'Failed to analyze YouTube video');
-            setIsStreaming(false);
-            setIsEnhancing(false);
-          },
-          () => {
-            setIsStreaming(false);
-            setIsProcessing(false);
-            setIsEnhancing(false);
-          },
-          (statusMsg) => {
-            // Handle status updates
-            setStatusMessage(statusMsg);
-            setIsEnhancing(true);
-          },
-          (enhancedSummary) => {
-            // Replace summary with enhanced version containing screenshots
-            console.log('Received enhanced summary, length:', enhancedSummary.length);
-            console.log('Contains images:', enhancedSummary.includes('![Screenshot'));
-
-            // Extract and log image data URI info
-            const imgMatch = enhancedSummary.match(/!\[Screenshot at [^\]]+\]\(data:image\/jpeg;base64,([^\)]+)\)/);
-            if (imgMatch) {
-              const base64Data = imgMatch[1];
-              console.log('First image base64 length:', base64Data.length);
-              console.log('First 50 chars:', base64Data.substring(0, 50));
-              console.log('Last 50 chars:', base64Data.substring(base64Data.length - 50));
-            } else {
-              console.warn('Could not find image markdown pattern');
-            }
-
-            setSummary(enhancedSummary);
-            setIsEnhancing(false);
-            setStatusMessage('');
-          }
+          onError,
+          onComplete,
+          onStatus,
+          onEnhance
         );
       }
     } catch (err) {
@@ -170,59 +251,94 @@ function App() {
     }
   };
 
+  const statusLabel = isEnhancing
+    ? 'ENHANCING'
+    : isStreaming
+      ? 'STREAMING'
+      : isProcessing
+        ? 'PROCESSING'
+        : error
+          ? 'ERROR'
+          : summary
+            ? 'COMPLETE'
+            : 'IDLE';
+
   return (
-    <div className="min-h-screen bg-surface-50 gradient-mesh">
-      {/* Header */}
-      <header className="glass-dark sticky top-0 z-40 shadow-card">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-primary-500/20 rounded-xl">
-                <Video className="text-white" size={28} />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-white">Video Summarizer</h1>
-                <p className="text-sm text-white/60">AI-powered video analysis with Google Gemini</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 px-4 py-2 bg-white/10 text-white rounded-full text-sm font-medium ring-1 ring-white/15">
-              <Sparkles size={16} className="text-accent-400" />
-              <span>Powered by Gemini AI</span>
-            </div>
-          </div>
-        </div>
-      </header>
+    <div className="scanlines grid-bg flex h-screen w-full overflow-hidden bg-background">
+      {/* History sidebar (client-side persisted) */}
+      <HistorySidebar
+        sessions={sessions}
+        activeId={activeId}
+        isProcessing={isProcessing}
+        onSelect={handleSelectSession}
+        onDelete={handleDeleteSession}
+        onClearAll={handleClearAll}
+        onNewAnalysis={handleNewAnalysis}
+      />
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Input Section */}
-        <div className="mb-6 animate-fade-in">
-          <div className="glass rounded-2xl shadow-card p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Upload Video or Enter YouTube URL</h2>
-            <VideoInput
-              onVideoSelect={handleVideoSelect}
-              onYouTubeSubmit={handleYouTubeSubmit}
-              isProcessing={isProcessing}
-            />
+      {/* Main column */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Header */}
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-card/60 px-4">
+          <div className="flex items-center gap-3">
+            <TerminalSquare className="size-5 text-primary" />
+            <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-primary text-glow">
+              video<span className="text-muted-foreground">::</span>summarizer
+            </h1>
           </div>
-        </div>
+          <div className="flex items-center gap-3">
+            <Badge variant="accent">
+              <Cpu className="size-3" />
+              gemini
+            </Badge>
+            <Badge variant={error ? 'destructive' : isProcessing ? 'default' : 'outline'}>
+              {isProcessing ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <CircleDot className="size-3" />
+              )}
+              {statusLabel.toLowerCase()}
+            </Badge>
+          </div>
+        </header>
 
-        {/* Split View */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left Panel - Video Player */}
-          <div className="glass rounded-2xl shadow-card p-6 animate-fade-in">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <Video size={20} className="text-primary-500" />
-              Video Preview
-            </h2>
-            <div style={{ height: 'calc(100vh - 400px)', minHeight: '400px' }}>
+        {/* Workspace: input + video on the left, analysis on the right */}
+        <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto p-4 xl:grid-cols-5 xl:overflow-hidden 2xl:grid-cols-2">
+          {/* Left: source */}
+          <section className="flex min-h-0 flex-col gap-4 xl:col-span-2 2xl:col-span-1">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle>// source input</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <VideoInput
+                  onVideoSelect={handleVideoSelect}
+                  onYouTubeSubmit={handleYouTubeSubmit}
+                  isProcessing={isProcessing}
+                />
+              </CardContent>
+            </Card>
+
+            <div className="min-h-[240px] flex-1 xl:min-h-0">
               <VideoPlayer videoFile={videoFile} youtubeUrl={youtubeUrl} />
             </div>
-          </div>
 
-          {/* Right Panel - Summary */}
-          <div className="space-y-4 animate-fade-in">
-            <div style={{ height: 'calc(100vh - 400px)', minHeight: '400px' }}>
+            {videoMetadata && (
+              <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <Badge variant="secondary">{videoMetadata.source}</Badge>
+                <span className="max-w-[60%] truncate" title={videoMetadata.filename}>
+                  {videoMetadata.filename}
+                </span>
+                {videoMetadata.size != null && (
+                  <span>· {formatBytes(videoMetadata.size)}</span>
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* Right: analysis output */}
+          <section className="flex min-h-0 flex-col gap-3 xl:col-span-3 2xl:col-span-1">
+            <div className="min-h-[320px] flex-1 xl:min-h-0">
               <SummaryPanel
                 summary={summary}
                 isStreaming={isStreaming}
@@ -231,9 +347,8 @@ function App() {
               />
             </div>
 
-            {/* PDF Download Button */}
             {summary && !isStreaming && !isEnhancing && (
-              <div className="glass rounded-2xl shadow-card p-6 animate-slide-up">
+              <div className="shrink-0 animate-fade-in">
                 <PDFDownload
                   summary={summary}
                   metadata={videoMetadata}
@@ -241,29 +356,20 @@ function App() {
                 />
               </div>
             )}
-          </div>
-        </div>
+          </section>
+        </main>
 
-        {/* Processing Overlay */}
-        {isProcessing && (
-          <div className="fixed inset-0 bg-primary-950/40 backdrop-blur-md flex items-center justify-center z-50">
-            <div className="glass rounded-2xl shadow-card-hover p-8 max-w-md mx-4 animate-slide-up">
-              <LoadingSpinner size="lg" message="Analyzing video with Gemini AI..." />
-              <p className="text-sm text-gray-500 text-center mt-4">
-                This may take a few moments depending on video length
-              </p>
-            </div>
+        {/* Status bar */}
+        <footer className="flex h-7 shrink-0 items-center justify-between border-t border-border bg-card/60 px-4 text-[10px] uppercase tracking-widest text-muted-foreground">
+          <div className="flex items-center gap-4">
+            <span>
+              <span className="text-primary">‣</span> status: {statusLabel}
+            </span>
+            <span>sessions: {sessions.length}</span>
           </div>
-        )}
-      </main>
-
-      {/* Footer */}
-      <footer className="mt-16 py-8 border-t border-primary-100/50 bg-white/40">
-        <div className="max-w-7xl mx-auto px-6 text-center text-sm text-gray-600">
-          <p>Built with React, Tailwind CSS, FastAPI, and Google Gemini AI</p>
-          <p className="mt-1 text-gray-500">&copy; 2026 Video Summarizer. All rights reserved.</p>
-        </div>
-      </footer>
+          <span>react · shadcn/ui · fastapi · gemini</span>
+        </footer>
+      </div>
     </div>
   );
 }
